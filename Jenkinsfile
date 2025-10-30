@@ -7,6 +7,7 @@ pipeline {
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
                 echo '📥 Cloning repository...'
@@ -20,8 +21,8 @@ pipeline {
                 bat """
                     if not exist %VENV_DIR% (%PYTHON% -m venv %VENV_DIR%)
                     call %VENV_DIR%\\Scripts\\activate
-                    python -m pip install --upgrade pip
-                    pip install -r requirements.txt
+                    %VENV_DIR%\\Scripts\\python.exe -m pip install --upgrade pip
+                    %VENV_DIR%\\Scripts\\pip.exe install -r requirements.txt
                 """
             }
         }
@@ -31,7 +32,7 @@ pipeline {
                 echo '🤖 Training model and saving model.pkl...'
                 bat """
                     call %VENV_DIR%\\Scripts\\activate
-                    python train_model.py
+                    %VENV_DIR%\\Scripts\\python.exe train_model.py
                 """
             }
         }
@@ -41,7 +42,7 @@ pipeline {
                 echo '🧪 Running tests...'
                 bat """
                     call %VENV_DIR%\\Scripts\\activate
-                    pytest --maxfail=1 --disable-warnings -q || echo "⚠️ Some tests failed, but continuing"
+                    %VENV_DIR%\\Scripts\\pytest.exe --maxfail=1 --disable-warnings -q || echo "⚠️ Some tests failed, but continuing"
                 """
             }
         }
@@ -51,8 +52,9 @@ pipeline {
                 echo '🚀 Starting FastAPI app...'
                 bat """
                     call %VENV_DIR%\\Scripts\\activate
-                    start /B uvicorn app.main:app --host 127.0.0.1 --port 8000
-                    timeout /t 10
+                    echo Starting FastAPI server...
+                    start /B %VENV_DIR%\\Scripts\\uvicorn.exe app.main:app --host 127.0.0.1 --port 8000 > fastapi.log 2>&1
+                    timeout /t 10 >nul
                 """
             }
         }
@@ -61,7 +63,9 @@ pipeline {
             steps {
                 echo '🌐 Testing /predict endpoint...'
                 bat """
-                    curl -X POST "http://127.0.0.1:8000/predict" -H "Content-Type: application/json" -d "{\\"overs\\":5,\\"wickets\\":1,\\"runs_so_far\\":45,\\"venue_factor\\":1}"
+                    curl -X POST "http://127.0.0.1:8000/predict" ^
+                    -H "Content-Type: application/json" ^
+                    -d "{\\"overs\\":5,\\"wickets\\":1,\\"runs_so_far\\":45,\\"venue_factor\\":1}"
                 """
             }
         }
@@ -70,9 +74,11 @@ pipeline {
     post {
         success {
             echo '✅ Build and API Test Completed Successfully!'
+            bat 'type fastapi.log'
         }
         failure {
-            echo '❌ Build Failed. Please check logs.'
+            echo '❌ Build Failed. Please check logs below.'
+            bat 'type fastapi.log || echo (No FastAPI log found)'
         }
     }
 }
