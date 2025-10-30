@@ -1,30 +1,76 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
-import joblib, numpy as np, os
+pipeline {
+    agent any
 
-MODEL_PATH = "model.pkl"
-app = FastAPI(title="IPL Score Predictor")
+    stages {
+        stage('Setup Environment') {
+            steps {
+                echo '🐍 Setting up Python environment...'
+                bat '''
+                python -m venv venv
+                call venv\\Scripts\\activate
+                pip install --upgrade pip
+                pip install -r requirements.txt
+                '''
+            }
+        }
 
-class MatchFeatures(BaseModel):
-    overs: float
-    wickets: int
-    runs_so_far: int
-    venue_factor: float = 1.0
+        stage('Train Model') {
+            steps {
+                echo '🤖 Training model and saving model.pkl...'
+                bat '''
+                call venv\\Scripts\\activate
+                python train_model.py
+                '''
+            }
+        }
 
-@app.on_event("startup")
-def load_model():
-    global model
-    try:
-        model = joblib.load(MODEL_PATH)
-        print("Model loaded from", MODEL_PATH)
-    except Exception as e:
-        model = None
-        print("Model not found:", e)
+        stage('Run Tests') {
+            steps {
+                echo '🧪 Running tests...'
+                bat '''
+                call venv\\Scripts\\activate
+                pytest > result.log
+                type result.log
+                '''
+            }
+        }
 
-@app.post("/predict")
-def predict(f: MatchFeatures):
-    if model is None:
-        return {"error":"model not available"}
-    X = np.array([[f.overs, f.wickets, f.runs_so_far, f.venue_factor]])
-    pred = model.predict(X)
-    return {"predicted_score": float(pred[0])}
+        stage('Run FastAPI App') {
+            steps {
+                echo '🚀 Starting FastAPI app in background...'
+                bat '''
+                call venv\\Scripts\\activate
+                start /B uvicorn app.main:app --host 127.0.0.1 --port 8000 > server.log 2>&1
+                timeout /t 10
+                '''
+            }
+        }
+
+        stage('Test API Endpoint') {
+            steps {
+                echo '🌐 Testing /predict endpoint...'
+                bat '''
+                call venv\\Scripts\\activate
+                curl -X POST "http://127.0.0.1:8000/predict" ^
+                -H "Content-Type: application/json" ^
+                -d "{\\"overs\\":5,\\"wickets\\":1,\\"runs_so_far\\":45,\\"venue_factor\\":1}"
+                '''
+            }
+        }
+    }
+
+    post {
+        always {
+            echo '🧹 Cleaning up (stopping FastAPI server)...'
+            bat 'taskkill /F /IM uvicorn.exe || exit 0'
+        }
+
+        success {
+            echo '✅ Build and Test Successful!'
+        }
+
+        failure {
+            echo '❌ Build Failed. Please check logs.'
+        }
+    }
+}
